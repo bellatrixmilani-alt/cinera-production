@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@keyframes filmstrip-infinite {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-filmstrip-loop {
+  display: flex;
+  width: max-content;
+  animation: filmstrip-infinite 28s linear infinite;
+}
