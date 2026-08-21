@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import FlowerDoodle from '@/components/ui/FlowerDoodle';
 import AuthModal from '@/components/auth/AuthModal';
 
 export default function HeroContent() {
@@ -40,7 +41,7 @@ export default function HeroContent() {
         <div className="flex items-center gap-4">
           <button 
             onClick={handleStepInside}
-            className="bg-[#3D2B1F] hover:bg-[#2B1F16] text-[#FAF6F0] px-9 py-3.5 rounded-full text-xs font-sans tracking-[0.2em] uppercase transition-all duration-300 flex items-center gap-2 shadow-sm cursor-pointer"
+            className="bg-[#3D2B1F] hover:bg-[#2B1F16] text-[#FAF6F0] px-9 py-3.5 rounded-full text-xs font-sans tracking-[0.2em] uppercase transition-all duration-300 flex items-center gap-2 shadow-sm cursor-pointer hover:scale-102"
           >
             <span>STEP INSIDE</span>
             <span className="text-sm">→</span>

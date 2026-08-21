@@ -1,7 +1,5 @@
-'use client';
-
 import React from 'react';
-import FlowerDoodle from '@/components/landing/FlowerDoodle';
+import FlowerDoodle from '@/components/ui/FlowerDoodle';
 
 export default function PageFloralBackground() {
   return (
@@ -13,7 +11,7 @@ export default function PageFloralBackground() {
         colorFill="#C5B4A1"
         colorLine="#8C4A27"
       />
-      
+
       {/* Top Right */}
       <FlowerDoodle
         size={65}

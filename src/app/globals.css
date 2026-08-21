@@ -16,3 +16,20 @@
   width: max-content;
   animation: filmstrip-infinite 28s linear infinite;
 }
+@layer base {
+  html, body {
+    height: 100%;
+    /* Prevents horizontal rubber-banding on iOS Safari */
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Custom hide-scrollbar utility for clean horizontal chips */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

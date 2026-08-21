@@ -1,747 +1,390 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
-import ShotList from '@/components/studio/ShotList';
-import ProfileDrawer from '@/components/studio/ProfileDrawer';
-import NetworkErrorHandler from '@/components/studio/NetworkErrorHandler';
-import { saveSpark } from '../../lib/sparks';
+import FlowerAtmosphere from '@/components/ui/FlowerAtmosphere';
+import FlowerDoodle from '@/components/ui/FlowerDoodle';
+import { getSparks, SparkItem } from '@/lib/sparks';
+import SettingsModal from '@/components/navigation/SettingsModal';
+import { supabase } from '@/lib/supabase/client';
 
-interface CalendarTask {
-  id: number;
-  dateNum: number;
-  title: string;
-  icon: string;
-  color: string;
-}
-
-interface TodoTask {
-  id: number;
+interface TodoItem {
+  id: string;
   text: string;
   done: boolean;
-  category: string;
 }
 
-interface ChatMessage {
-  sender: 'friend' | 'user';
-  text: string;
+interface ShotListData {
+  title: string;
+  logline: string;
+  scenes: any[];
 }
 
-export default function StudioPage() {
+function StudioDashboardContent() {
   const router = useRouter();
-  const [genre, setGenre] = useState<string>('TRAVEL CONTENT');
-  const [promptText, setPromptText] = useState<string>('');
-  const [userName, setUserName] = useState<string>('Winnie');
-  
-  // UI States
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [isOverwhelmedOpen, setIsOverwhelmedOpen] = useState(false);
-  const [isTodoModalOpen, setIsTodoModalOpen] = useState(false);
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Best-Friend Therapy Chatbox States
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      sender: 'friend',
-      text: "Hey Winnie, I'm right here. Take a deep breath... What's going on today? Is it brain fog, too many ideas, or just life getting heavy?",
-    },
-  ]);
-  const [chatInput, setChatInput] = useState('');
-  const [isFriendTyping, setIsFriendTyping] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const [userId, setUserId] = useState<string>('guest');
+  const [greeting, setGreeting] = useState('');
+  const [currentDate, setCurrentDate] = useState('');
+  const [quickPrompt, setQuickPrompt] = useState('');
+  const [activeCategory, setActiveCategory] = useState('All Tools');
+  const [sparks, setSparks] = useState<SparkItem[]>([]);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [activeShotlist, setActiveShotlist] = useState<ShotListData | null>(null);
+  const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [newTodo, setNewTodo] = useState('');
 
-  // Dynamic Calendar Week Tasks
-  const [scheduledTasks, setScheduledTasks] = useState<CalendarTask[]>([]);
-
-  // Sparks State
-  const [recentSparks, setRecentSparks] = useState([
-    { id: 1, text: 'A travel vignette shot entirely at 6 AM.', date: '2 days ago' },
-    { id: 2, text: 'Capturing ocean reflections through train glass.', date: 'Yesterday' },
-  ]);
-
-  // To-Do List State
-  const [todoTasks, setTodoTasks] = useState<TodoTask[]>([
-    { id: 1, text: 'Scout 6 AM location at Nairobi CBD', done: true, category: 'PRE-PRODUCTION' },
-    { id: 2, text: 'Record B-roll of morning mist & reflections', done: false, category: 'FILMING' },
-    { id: 3, text: 'Apply 35mm warm film grain preset', done: false, category: 'EDITING' },
-  ]);
-  const [newTodoInput, setNewTodoInput] = useState('');
-
-  // Load Saved Data
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const storedName = localStorage.getItem('cinera_user_name');
-      if (storedName) setUserName(storedName);
+    const now = new Date();
+    const hour = now.getHours();
 
-      const storedGenre = localStorage.getItem('cinera_primary_genre');
-      if (storedGenre) setGenre(storedGenre.toUpperCase());
-
-      // Load Calendar Events
-      const storedCal = localStorage.getItem('cinera_calendar_events');
-      if (storedCal) {
-        try {
-          setScheduledTasks(JSON.parse(storedCal));
-        } catch (e) {
-          console.error(e);
-        }
-      }
-
-      // Load Saved Sparks
-      const storedSparks = localStorage.getItem('cinera_recent_sparks');
-      if (storedSparks) {
-        try {
-          const parsed = JSON.parse(storedSparks);
-          if (parsed.length > 0) setRecentSparks(parsed);
-        } catch (e) {
-          console.error(e);
-        }
-      }
-
-      // Load Saved To-Dos
-      const storedTodos = localStorage.getItem('cinera_todo_list');
-      if (storedTodos) {
-        try {
-          const parsed = JSON.parse(storedTodos);
-          if (parsed.length > 0) setTodoTasks(parsed);
-        } catch (e) {
-          console.error(e);
-        }
-      }
+    if (hour >= 5 && hour < 12) {
+      setGreeting('Good morning.');
+    } else if (hour >= 12 && hour < 17) {
+      setGreeting('Good afternoon.');
+    } else if (hour >= 17 && hour < 22) {
+      setGreeting('Good evening.');
+    } else {
+      setGreeting('Late night studio.');
     }
+
+    const dateFormatted = now.toLocaleDateString('en-US', {
+      weekday: 'long',
+      month: 'short',
+      day: 'numeric',
+    });
+    setCurrentDate(dateFormatted);
+
+    supabase.auth.getUser().then(({ data }) => {
+      const activeUid = data?.user?.id || 'guest';
+      setUserId(activeUid);
+
+      getSparks().then((res) => setSparks(res.slice(0, 3))).catch(() => {});
+
+      const savedTodos = localStorage.getItem(`cinera_active_todos_${activeUid}`);
+      if (savedTodos) {
+        try {
+          setTodos(JSON.parse(savedTodos));
+        } catch (e) {
+          console.error(e);
+        }
+      } else {
+        setTodos([]);
+      }
+
+      const savedShot = localStorage.getItem(`cinera_active_shotlist_${activeUid}`);
+      if (savedShot) {
+        try {
+          setActiveShotlist(JSON.parse(savedShot));
+        } catch (e) {
+          console.error(e);
+        }
+      } else {
+        setActiveShotlist(null);
+      }
+    });
   }, []);
 
-  // Auto-scroll chatbox
-  useEffect(() => {
-    if (isOverwhelmedOpen) {
-      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [chatMessages, isOverwhelmedOpen, isFriendTyping]);
-
-  const triggerToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 2500);
+  const toggleTodo = (id: string) => {
+    const updated = todos.map((t) => (t.id === id ? { ...t, done: !t.done } : t));
+    setTodos(updated);
+    localStorage.setItem(`cinera_active_todos_${userId}`, JSON.stringify(updated));
   };
 
-  const handleVisionCreate = () => {
-    if (promptText.trim()) {
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('cinera_active_prompt', promptText);
-      }
-      router.push(`/studio/video-generator?prompt=${encodeURIComponent(promptText)}`);
-    } else {
+  const handleAddTodo = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTodo.trim()) return;
+    const updated = [...todos, { id: Date.now().toString(), text: newTodo.trim(), done: false }];
+    setTodos(updated);
+    localStorage.setItem(`cinera_active_todos_${userId}`, JSON.stringify(updated));
+    setNewTodo('');
+  };
+
+  const handleLaunch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickPrompt.trim()) {
       router.push('/studio/video-generator');
+      return;
     }
+    router.push(`/studio/video-generator?prompt=${encodeURIComponent(quickPrompt.trim())}`);
   };
 
-  // Direct Save to Sparks Trigger
-  const handleSaveVisionToSpark = () => {
-    if (!promptText.trim()) return;
-    saveSpark(promptText);
-    setPromptText('');
-    triggerToast('💡 Saved as a new Spark! Visible under Sparks.');
-  };
-
-  // To-Do Handlers
-  const toggleTodo = (id: number) => {
-    const updated = todoTasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t));
-    setTodoTasks(updated);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('cinera_todo_list', JSON.stringify(updated));
-    }
-  };
-
-  const handleAddModalTodo = () => {
-    if (!newTodoInput.trim()) return;
-    const newTask: TodoTask = {
-      id: Date.now(),
-      text: newTodoInput.trim(),
-      done: false,
-      category: 'PRE-PRODUCTION',
-    };
-    const updated = [newTask, ...todoTasks];
-    setTodoTasks(updated);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('cinera_todo_list', JSON.stringify(updated));
-    }
-    setNewTodoInput('');
-  };
-
-  // Best Friend Interactive Therapy Chat Handler
-  const handleSendMessageToFriend = () => {
-    if (!chatInput.trim()) return;
-
-    const userMsg = chatInput.trim();
-    const updatedMessages: ChatMessage[] = [...chatMessages, { sender: 'user', text: userMsg }];
-    setChatMessages(updatedMessages);
-    setChatInput('');
-    setIsFriendTyping(true);
-
-    // Dynamic Best-Friend Conversational Response
-    setTimeout(() => {
-      let replyText = "I completely hear you. That sounds exhausting. You don't have to carry the whole project on your shoulders right now. What if we just pick ONE simple, quiet moment to film and leave everything else for later?";
-
-      const lower = userMsg.toLowerCase();
-      if (lower.includes('too many') || lower.includes('ideas') || lower.includes('confused')) {
-        replyText = "I know that feeling so well—your head feels full of noise. Let's park 90% of those ideas for later. What is the SINGLE visual or sentence that made you feel happy today?";
-      } else if (lower.includes('tired') || lower.includes('exhausted') || lower.includes('burnout') || lower.includes('stress')) {
-        replyText = "First off: give yourself credit for creating anything at all. You don't owe anyone a masterpiece today. If you want, we can make something super simple—like a 10-second clip with warm room audio.";
-      } else if (lower.includes('don\'t know') || lower.includes('start') || lower.includes('blank')) {
-        replyText = "That's totally okay! Blank pages are scary. Why don't we start with something you already did today—like grabbing coffee or looking out the window?";
-      }
-
-      setChatMessages([...updatedMessages, { sender: 'friend', text: replyText }]);
-      setIsFriendTyping(false);
-    }, 1200);
-  };
-
-  // Active Week Data (Mon 12 - Fri 16 Dec)
-  const currentWeekDays = [
-    { num: 12, dayName: 'MON' },
-    { num: 13, dayName: 'TUE' },
-    { num: 14, dayName: 'WED' },
-    { num: 15, dayName: 'THU' },
-    { num: 16, dayName: 'FRI' },
-  ];
+  const toolPills = ['All Tools', 'Concept Room', 'Shot List', 'Sparks Vault', 'Calendar'];
 
   return (
-    <div className="min-h-screen w-full bg-[#F5ECE1] text-[#241711] p-6 md:p-10 font-sans relative overflow-x-hidden">
-      
-      {/* Toast Feedback */}
-      <AnimatePresence>
-        {toastMessage && (
-          <motion.div
-            initial={{ opacity: 0, y: -20, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="fixed top-6 right-6 bg-[#6B4426] text-[#FAF6F0] px-5 py-3 rounded-2xl shadow-2xl text-xs font-sans font-bold flex items-center gap-2 z-50 border border-[#FAF6F0]/20"
-          >
-            <span>💡</span>
-            <span>{toastMessage}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
+    <div className="min-h-screen min-h-[100dvh] w-full bg-[#FAF6F0] text-[#241711] font-sans selection:bg-[#EADBC8] relative overflow-x-hidden flex flex-col justify-between">
+      <FlowerAtmosphere />
 
-      {/* 01 — NAVIGATION HEADER */}
-      <nav className="w-full max-w-7xl mx-auto flex justify-between items-center pb-8 border-b-2 border-dashed border-[#8C4A27]/25 mb-8">
-        <span className="text-2xl font-serif font-black tracking-[0.2em] uppercase text-[#241711]">
-          CINERA
-        </span>
-
-        <div className="hidden md:flex items-center gap-8 text-xs font-sans tracking-[0.2em] text-[#8C4A27] uppercase font-bold">
-          <button className="text-[#241711] font-black cursor-pointer">Home</button>
-          <button onClick={() => router.push('/todo')} className="hover:text-[#241711] transition-colors cursor-pointer">To-Do List</button>
-          <button onClick={() => router.push('/sparks')} className="hover:text-[#241711] transition-colors cursor-pointer">Sparks</button>
-          <button onClick={() => router.push('/calendar')} className="hover:text-[#241711] transition-colors cursor-pointer">Calendar</button>
-        </div>
-
-        <div className="flex items-center gap-5">
-          <button className="text-xs font-sans tracking-[0.15em] text-[#8C4A27] hover:text-[#241711] font-bold uppercase cursor-pointer">
-            SEARCH
-          </button>
-
-          {/* + CREATE Dropdown */}
-          <div className="relative">
-            <button
-              onClick={() => setIsCreateOpen(!isCreateOpen)}
-              className="bg-[#6B4426] hover:bg-[#52331B] text-[#FAF6F0] px-6 py-2.5 rounded-full text-xs font-sans tracking-[0.15em] uppercase transition-all duration-300 flex items-center gap-2 shadow-[4px_4px_0px_0px_rgba(140,74,39,0.25)] hover:scale-102 cursor-pointer font-bold"
-            >
-              <span>✦</span>
-              <span>Create</span>
-            </button>
-
-            <AnimatePresence>
-              {isCreateOpen && (
-                <>
-                  <div
-                    onClick={() => setIsCreateOpen(false)}
-                    className="fixed inset-0 bg-transparent z-40"
-                  />
-                  <motion.div
-                    initial={{ opacity: 0, y: -10, scale: 0.96 }}
-                    animate={{ opacity: 1, y: 12, scale: 1 }}
-                    exit={{ opacity: 0, y: -10, scale: 0.96 }}
-                    className="absolute right-0 top-full w-56 bg-[#EADBC8] border-2 border-[#8C4A27]/30 rounded-2xl p-3 shadow-[6px_6px_0px_0px_rgba(140,74,39,0.25)] z-50"
-                  >
-                    <div className="text-[10px] font-sans tracking-widest text-[#8C4A27] uppercase px-2 py-1 mb-1 border-b border-[#8C4A27]/20 font-black">
-                      Create New
-                    </div>
-                    <div className="space-y-1">
-                      {[
-                        { label: 'Video Idea', icon: '🎬', action: () => router.push('/studio/video-generator') },
-                        { label: 'To-Do List', icon: '📝', action: () => setIsTodoModalOpen(true) },
-                        { label: 'Spark', icon: '💡', action: () => router.push('/sparks') },
-                        { label: 'Shot List', icon: '📋', action: () => router.push('/studio/shot-list') },
-                        { label: 'Calendar Task', icon: '📅', action: () => router.push('/calendar') },
-                      ].map((opt) => (
-                        <button
-                          key={opt.label}
-                          onClick={() => {
-                            setIsCreateOpen(false);
-                            if (opt.action) opt.action();
-                          }}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-sans text-[#241711] hover:bg-[#FAF6F0] transition-colors cursor-pointer text-left font-bold"
-                        >
-                          <span>{opt.icon}</span>
-                          <span>{opt.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
-          </div>
-
-          {/* User Profile Avatar Trigger */}
-          <button
-            onClick={() => setIsProfileOpen(true)}
-            className="w-9 h-9 rounded-full bg-[#6B4426] hover:bg-[#52331B] text-[#FAF6F0] flex items-center justify-center font-serif text-sm font-bold shadow-2xs border border-[#FAF6F0]/20 cursor-pointer hover:scale-105 transition-transform"
-          >
-            {userName.charAt(0).toUpperCase()}
-          </button>
-        </div>
-      </nav>
-
-      {/* 02 — HERO WRITER'S DESK */}
-      <section className="w-full max-w-4xl mx-auto text-center flex flex-col items-center mb-12">
-        <span className="text-[11px] font-sans tracking-[0.25em] text-[#8C4A27] uppercase block mb-1 font-black bg-[#EADBC8] border border-[#8C4A27]/25 px-3 py-1 rounded-full shadow-2xs">
-          🎙️ GENRE: {genre}
-        </span>
-        <h1 className="text-4xl sm:text-6xl font-serif text-[#241711] font-bold tracking-tight mb-2">
-          Good morning, {userName}.
-        </h1>
-        <p className="text-xs sm:text-sm font-serif italic text-[#8C4A27] max-w-md mb-8 font-medium">
-          "Turn a raw thought, feeling, or unfinished observation into something worth making."
-        </p>
-
-        {/* Vision Prompt Box */}
-        <div className="w-full max-w-2xl bg-[#EADBC8] border-2 border-[#8C4A27]/35 rounded-[32px] p-6 shadow-[8px_8px_0px_0px_rgba(140,74,39,0.2)] hover:shadow-[10px_10px_0px_0px_rgba(140,74,39,0.3)] transition-all">
-          <textarea
-            rows={3}
-            value={promptText}
-            onChange={(e) => setPromptText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleVisionCreate();
-              }
-            }}
-            placeholder=' "I want to create a cinematic film about..." '
-            className="w-full bg-transparent text-sm sm:text-base font-serif text-[#241711] placeholder-[#8C4A27]/60 focus:outline-none resize-none leading-relaxed italic"
-          />
-
-          <div className="flex justify-between items-center pt-4 border-t-2 border-dashed border-[#8C4A27]/25 mt-2">
-            <span className="text-[10px] font-sans tracking-wider text-[#8C4A27] font-black uppercase">
-              ✨ WRITER'S DESK • READY
-            </span>
-
-            <div className="flex items-center gap-2 sm:gap-3">
-              <button 
-                onClick={handleSaveVisionToSpark}
-                title="Save as Spark"
-                className="bg-[#FAF6F0] hover:bg-[#F5ECE1] text-[#241711] px-4 py-2 rounded-full text-[11px] font-sans font-bold transition-all cursor-pointer border-2 border-[#8C4A27]/25 flex items-center gap-1.5 shadow-2xs hover:scale-102"
-              >
-                <span>💡</span>
-                <span>Save to Spark</span>
-              </button>
-
-              <button 
-                onClick={handleVisionCreate}
-                className="bg-[#6B4426] hover:bg-[#52331B] text-[#FAF6F0] px-5 py-2 rounded-full text-xs font-sans tracking-[0.15em] uppercase transition-all duration-200 flex items-center gap-1.5 shadow-md cursor-pointer font-bold hover:scale-102"
-              >
-                <span>✦</span>
-                <span>Refine Idea</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-5">
-          <button
-            onClick={() => setIsOverwhelmedOpen(true)}
-            className="text-xs font-sans text-[#8C4A27] hover:text-[#241711] bg-[#EADBC8] border border-[#8C4A27]/25 px-4 py-1.5 rounded-full transition-all duration-200 cursor-pointer flex items-center gap-1.5 shadow-2xs font-bold"
-          >
-            <span>Feeling stuck?</span>
-            <span className="text-[#241711] font-bold underline">I'm overwhelmed →</span>
-          </button>
-        </div>
-      </section>
-
-      {/* 03 — CREATIVE MODULES GRID */}
-      <main className="w-full max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-12 gap-6 mb-16">
+      {/* MAIN CONTAINER */}
+      <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 md:px-8 py-5 sm:py-8 relative z-10 flex flex-col gap-5 sm:gap-6 flex-1">
         
-        {/* Module 1: Idea Refiner Studio */}
-        <div 
-          onClick={() => router.push('/studio/video-generator')}
-          className="md:col-span-7 bg-[#EADBC8] border-2 border-[#8C4A27]/35 rounded-[32px] p-6 shadow-[6px_6px_0px_0px_rgba(140,74,39,0.2)] hover:shadow-[8px_8px_0px_0px_rgba(140,74,39,0.3)] transition-all duration-300 flex flex-col justify-between h-[320px] group cursor-pointer"
-        >
-          <div>
-            <div className="flex justify-between items-center mb-1">
-              <span className="text-[10px] font-sans tracking-[0.25em] text-[#8C4A27] uppercase font-black">
-                💡 IDEA REFINER STUDIO
+        {/* TOP BAR: BRAND + ACTIONS */}
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-[#EADBC8] border border-[#8C4A27]/25 flex items-center justify-center shadow-xs shrink-0">
+              <FlowerDoodle size={26} />
+            </div>
+            <div>
+              <span className="text-[9px] sm:text-[10px] font-mono uppercase tracking-widest text-[#8C4A27] font-bold block">
+                {currentDate}
               </span>
-              <span className="text-[10px] font-sans text-[#6B4426] font-bold bg-[#FAF6F0] px-2.5 py-0.5 rounded-full border border-[#8C4A27]/20">Active Brainstorming</span>
-            </div>
-            <p className="text-xs font-serif italic text-[#8C4A27]">Turn a generic thought into a unique multi-platform angle.</p>
-          </div>
-
-          <div className="relative w-full h-36 rounded-2xl overflow-hidden bg-[#F5ECE1] border-2 border-[#8C4A27]/20 p-4 flex flex-col justify-between my-2 shadow-2xs">
-            <span className="text-[9px] font-sans font-black tracking-widest text-[#8C4A27] uppercase">
-              ✨ LATEST CONCEPT ANGLE
-            </span>
-            <p className="text-xs font-serif italic text-[#241711] leading-relaxed font-medium">
-              "Skip the standard vlog intro. Open mid-action at 0:02 with the high-stakes moment of the day."
-            </p>
-            <span className="text-[10px] font-sans text-[#6B4426] font-bold">
-              Multi-Platform Fit • High Retention Opening
-            </span>
-          </div>
-
-          <div className="flex justify-between items-center pt-1">
-            <span className="text-xs font-serif italic text-[#241711] font-bold">Coastal Escape Concept</span>
-            <span className="text-xs font-sans tracking-widest uppercase text-[#241711] group-hover:translate-x-1 transition-transform font-black">
-              Refine Ideas →
-            </span>
-          </div>
-        </div>
-
-        {/* Module 2: RECENT TO-DO LIST WIDGET */}
-        <div 
-          onClick={() => setIsTodoModalOpen(true)}
-          className="md:col-span-5 bg-[#EADBC8] border-2 border-[#8C4A27]/35 rounded-[32px] p-6 shadow-[6px_6px_0px_0px_rgba(140,74,39,0.2)] hover:shadow-[8px_8px_0px_0px_rgba(140,74,39,0.3)] transition-all duration-300 flex flex-col justify-between h-[320px] cursor-pointer group"
-        >
-          <div>
-            <div className="flex justify-between items-center mb-1">
-              <span className="text-[10px] font-sans tracking-[0.25em] text-[#8C4A27] uppercase font-black">
-                📝 TODAY'S NARRATIVE (TO-DO)
-              </span>
-              <span className="text-[10px] font-sans text-[#241711] font-black underline">
-                View All →
-              </span>
-            </div>
-            <p className="text-xs font-serif italic text-[#8C4A27] mb-3">Focus on essential production steps.</p>
-
-            <div className="space-y-2 max-h-[180px] overflow-y-auto pr-1">
-              {todoTasks.slice(0, 4).map((t) => (
-                <div
-                  key={t.id}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleTodo(t.id);
-                  }}
-                  className="flex items-center justify-between bg-[#F5ECE1] border border-[#8C4A27]/20 rounded-xl p-2.5 text-xs font-serif text-[#241711] hover:bg-[#FAF6F0] transition-colors shadow-2xs"
-                >
-                  <div className="flex items-center gap-2 truncate">
-                    <div className={`w-4 h-4 rounded-full border-2 border-[#6B4426] flex items-center justify-center ${t.done ? 'bg-[#6B4426]' : ''}`}>
-                      {t.done && <span className="text-white text-[8px] font-bold">✓</span>}
-                    </div>
-                    <span className={`truncate ${t.done ? 'line-through opacity-50' : 'font-medium'}`}>
-                      {t.text}
-                    </span>
-                  </div>
-                  <span className="text-[8px] font-sans font-black text-[#8C4A27] bg-[#EADBC8] px-1.5 py-0.5 rounded-md uppercase ml-2 shrink-0 border border-[#8C4A27]/20">
-                    {t.category}
-                  </span>
-                </div>
-              ))}
+              <h1 className="text-lg sm:text-2xl font-serif font-bold text-[#241711] leading-tight">
+                {greeting} <span className="italic font-normal text-[#8C4A27] hidden xs:inline">Ready to create?</span>
+              </h1>
             </div>
           </div>
 
-          <div className="pt-2 border-t-2 border-dashed border-[#8C4A27]/25 flex justify-between items-center text-[10px] font-sans text-[#8C4A27] font-black">
-            <span>{todoTasks.filter(t => t.done).length} / {todoTasks.length} Done</span>
-            <span className="group-hover:translate-x-1 transition-transform">Open Modal →</span>
-          </div>
-        </div>
-
-        {/* Module 3: Dynamic Sparks List */}
-        <div className="md:col-span-5 bg-[#EADBC8] border-2 border-[#8C4A27]/35 rounded-[32px] p-6 shadow-[6px_6px_0px_0px_rgba(140,74,39,0.2)] flex flex-col justify-between h-[280px]">
-          <div>
-            <div className="flex justify-between items-center mb-1">
-              <span className="text-[10px] font-sans tracking-[0.25em] text-[#8C4A27] uppercase font-black">
-                💡 RECENT SPARKS
-              </span>
-              <button
-                onClick={() => router.push('/sparks')}
-                className="text-[10px] font-sans text-[#241711] font-black underline cursor-pointer"
-              >
-                View All →
-              </button>
-            </div>
-            <p className="text-xs font-serif italic text-[#8C4A27] mb-3">Saved thoughts & ideas.</p>
-
-            <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
-              {recentSparks.map((spk) => (
-                <div key={spk.id} className="bg-[#F5ECE1] border border-[#8C4A27]/20 rounded-xl p-3 text-xs font-serif text-[#241711] shadow-2xs">
-                  <p className="italic font-medium">"{spk.text}"</p>
-                  <span className="text-[9px] font-sans text-[#8C4A27] font-bold block mt-1">{spk.date}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Module 4: Smart AI Shot List */}
-        <div className="md:col-span-7 h-[280px]">
-          <ShotList />
-        </div>
-
-        {/* Module 5: LIVE CALENDAR WEEK DISPLAY */}
-        <div
-          onClick={() => router.push('/calendar')}
-          className="md:col-span-12 bg-[#EADBC8] border-2 border-[#8C4A27]/35 rounded-[32px] p-6 shadow-[6px_6px_0px_0px_rgba(140,74,39,0.2)] hover:shadow-[8px_8px_0px_0px_rgba(140,74,39,0.3)] transition-all duration-300 flex flex-col justify-between cursor-pointer group"
-        >
-          <div>
-            <div className="flex justify-between items-center mb-3">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-sans tracking-[0.25em] text-[#8C4A27] uppercase font-black">
-                  📅 THIS WEEK'S PRODUCTION CALENDAR
-                </span>
-                <span className="text-[9px] font-sans bg-[#6B4426] text-[#FAF6F0] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                  AUTO-SAVED
-                </span>
-              </div>
-              <span className="text-xs font-sans text-[#241711] font-black group-hover:translate-x-1 transition-transform">
-                Open Full Calendar →
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-2">
-              {currentWeekDays.map((wDay) => {
-                const dayEvents = scheduledTasks.filter((t) => t.dateNum === wDay.num);
-                return (
-                  <div
-                    key={wDay.num}
-                    className="bg-[#F5ECE1] border border-[#8C4A27]/20 rounded-2xl p-3 min-h-[95px] flex flex-col justify-between group-hover:border-[#8C4A27] transition-colors shadow-2xs"
-                  >
-                    <div className="flex justify-between items-center">
-                      <span className="text-[10px] font-sans font-black text-[#8C4A27]">{wDay.dayName}</span>
-                      <span className="text-xs font-serif font-bold text-[#241711]">{wDay.num}</span>
-                    </div>
-
-                    <div className="space-y-1 my-1">
-                      {dayEvents.length === 0 ? (
-                        <span className="text-[9px] font-sans text-[#8C4A27]/60 italic font-medium block">+ Add task</span>
-                      ) : (
-                        dayEvents.slice(0, 2).map((evt) => (
-                          <div
-                            key={evt.id}
-                            style={{ backgroundColor: evt.color || '#D8C3B0' }}
-                            className="text-[9px] font-sans font-bold px-1.5 py-0.5 rounded-md text-[#241711] truncate flex items-center gap-1 shadow-2xs border border-[#8C4A27]/15"
-                          >
-                            <span>{evt.icon}</span>
-                            <span className="truncate">{evt.title}</span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-      </main>
-
-      {/* TODAY'S NARRATIVE (TO-DO LIST) POPUP MODAL */}
-      <AnimatePresence>
-        {isTodoModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsTodoModalOpen(false)}
-              className="absolute inset-0 bg-[#241711]/50 backdrop-blur-xs cursor-pointer"
-            />
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.94, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.94, y: 15 }}
-              className="relative w-full max-w-md bg-[#EADBC8] border-2 border-[#8C4A27]/40 rounded-[36px] p-8 shadow-[10px_10px_0px_0px_rgba(140,74,39,0.3)] z-10 flex flex-col items-center text-center font-sans"
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => router.push('/studio/video-generator')}
+              className="bg-[#6B4426] hover:bg-[#52331B] text-[#FAF6F0] px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer min-h-[40px]"
             >
-              <button
-                onClick={() => setIsTodoModalOpen(false)}
-                className="absolute top-5 right-5 text-[#8C4A27] hover:text-[#241711] text-xs font-sans cursor-pointer font-black"
-              >
-                ✕
-              </button>
+              <span>+</span>
+              <span className="hidden sm:inline">New Concept</span>
+              <span className="sm:hidden">Create</span>
+            </button>
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="w-10 h-10 rounded-xl bg-[#EADBC8]/70 border border-[#8C4A27]/20 flex items-center justify-center text-sm font-bold text-[#8C4A27] hover:bg-[#EADBC8] transition-colors cursor-pointer"
+              title="Studio Settings & Notifications"
+            >
+              ⚙
+            </button>
+            <button
+              onClick={() => router.push('/')}
+              className="w-10 h-10 rounded-xl bg-[#EADBC8]/70 border border-[#8C4A27]/20 flex items-center justify-center text-sm font-bold text-[#8C4A27] hover:bg-[#EADBC8] transition-colors cursor-pointer"
+              title="Landing"
+            >
+              ⌂
+            </button>
+          </div>
+        </header>
 
-              <div className="bg-[#FAF6F0] border border-[#8C4A27]/25 px-4 py-1.5 rounded-full mb-4 shadow-2xs">
-                <span className="text-[10px] font-serif tracking-[0.15em] text-[#6B5546] uppercase font-bold">
-                  PRODUCTION CHECKLIST
+        {/* SEARCH / PROMPT INPUT PILL */}
+        <form
+          onSubmit={handleLaunch}
+          className="w-full bg-[#EADBC8]/80 backdrop-blur-md border border-[#8C4A27]/25 rounded-2xl p-2 sm:p-2.5 pl-3.5 sm:pl-4 flex items-center gap-2 sm:gap-3 shadow-xs focus-within:border-[#6B4426] transition-all"
+        >
+          <span className="text-xs sm:text-sm text-[#8C4A27]">✦</span>
+          <input
+            type="text"
+            value={quickPrompt}
+            onChange={(e) => setQuickPrompt(e.target.value)}
+            placeholder="Pitch Cinera an idea or film premise..."
+            className="flex-1 bg-transparent text-xs sm:text-sm font-serif text-[#241711] placeholder-[#8C4A27]/60 focus:outline-none min-w-0"
+          />
+          <button
+            type="submit"
+            className="bg-[#6B4426] text-[#FAF6F0] px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl text-[11px] sm:text-xs font-bold uppercase tracking-wider transition-all hover:bg-[#52331B] shrink-0 cursor-pointer shadow-xs"
+          >
+            Brainstorm
+          </button>
+        </form>
+
+        {/* FEATURED HERO CARD */}
+        <div className="relative overflow-hidden bg-gradient-to-br from-[#6B4426] via-[#5A381E] to-[#452712] text-[#FAF6F0] rounded-[24px] sm:rounded-[28px] p-5 sm:p-7 shadow-md border border-[#8C4A27]/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 sm:gap-6">
+          <div className="absolute right-0 bottom-0 opacity-15 pointer-events-none translate-x-6 translate-y-6 sm:translate-x-8 sm:translate-y-8">
+            <FlowerDoodle size={200} colorFill="#F0B8C0" colorInner="#E098A0" strokeColor="transparent" />
+          </div>
+
+          <div className="max-w-xl relative z-10">
+            <span className="text-[9px] sm:text-[10px] font-mono tracking-widest uppercase bg-[#FAF6F0]/15 px-2.5 sm:px-3 py-1 rounded-full text-[#FAF6F0] font-bold inline-block mb-2 sm:mb-2.5">
+              ACTIVE PRODUCTION TREATMENT
+            </span>
+            <h2 className="text-lg sm:text-2xl font-serif font-bold text-[#FAF6F0] mb-1.5 leading-snug">
+              {activeShotlist ? activeShotlist.title : 'Start Your First Story Treatment'}
+            </h2>
+            <p className="text-xs sm:text-sm font-serif text-[#FAF6F0]/80 leading-relaxed">
+              {activeShotlist
+                ? `"${activeShotlist.logline}"`
+                : 'Turn video concepts into staged directorial beats with camera angles and lighting.'}
+            </p>
+          </div>
+
+          <div className="relative z-10 w-full md:w-auto">
+            <button
+              onClick={() => router.push('/studio/shot-list')}
+              className="w-full md:w-auto bg-[#FAF6F0] hover:bg-[#EADBC8] text-[#241711] px-5 py-2.5 sm:py-3 rounded-xl text-xs font-sans font-bold uppercase tracking-wider transition-all shadow-xs text-center cursor-pointer min-h-[44px] flex items-center justify-center"
+            >
+              {activeShotlist ? 'Resume Shot List →' : 'Create Shot List →'}
+            </button>
+          </div>
+        </div>
+
+        {/* CATEGORY FILTER CHIPS */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
+          {toolPills.map((pill) => (
+            <button
+              key={pill}
+              onClick={() => setActiveCategory(pill)}
+              className={`px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap border shrink-0 min-h-[36px] ${
+                activeCategory === pill
+                  ? 'bg-[#6B4426] text-[#FAF6F0] border-[#6B4426] shadow-xs'
+                  : 'bg-[#EADBC8]/60 hover:bg-[#EADBC8] text-[#8C4A27] border-[#8C4A27]/20'
+              }`}
+            >
+              {pill}
+            </button>
+          ))}
+        </div>
+
+        {/* WORKSPACE GRID */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          
+          {/* TO-DO ROUTINE */}
+          <div className="lg:col-span-5 bg-[#EADBC8]/70 backdrop-blur-xs border border-[#8C4A27]/25 rounded-2xl p-4 sm:p-5 flex flex-col justify-between shadow-xs gap-4">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[10px] font-mono uppercase font-bold tracking-wider text-[#8C4A27]">
+                  TODAY'S PRODUCTION ROUTINE
+                </span>
+                <span className="text-[10px] font-bold text-[#8C4A27] bg-[#FAF6F0] px-2 py-0.5 rounded-md border border-[#8C4A27]/15">
+                  {todos.filter((t) => t.done).length}/{todos.length} done
                 </span>
               </div>
 
-              <h2 className="text-2xl font-serif tracking-[0.08em] text-[#241711] uppercase font-bold mb-1">
-                TODAY'S NARRATIVE
-              </h2>
-              <p className="text-xs font-serif italic text-[#8C4A27] mb-6 font-medium">
-                Focus on the essential steps
-              </p>
+              <div className="space-y-2 mb-2">
+                {todos.length === 0 ? (
+                  <p className="text-xs font-serif italic text-[#8C4A27]/70 py-4 text-center">
+                    No active tasks yet. Add one below to kick off your day.
+                  </p>
+                ) : (
+                  todos.slice(0, 3).map((todo) => (
+                    <div
+                      key={todo.id}
+                      onClick={() => toggleTodo(todo.id)}
+                      className="flex items-center gap-2.5 p-2 rounded-xl bg-[#FAF6F0]/60 hover:bg-[#FAF6F0] transition-colors cursor-pointer text-xs font-serif select-none border border-[#8C4A27]/10"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={todo.done}
+                        onChange={() => toggleTodo(todo.id)}
+                        className="accent-[#6B4426] rounded cursor-pointer w-4 h-4"
+                      />
+                      <span className={todo.done ? 'line-through text-[#8C4A27]/50' : 'text-[#241711] font-medium truncate'}>
+                        {todo.text}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
 
-              {/* Task Add Input inside Modal */}
-              <div className="w-full flex gap-2 mb-5">
+            <div className="flex flex-col gap-2 pt-3 border-t border-[#8C4A27]/15">
+              <form onSubmit={handleAddTodo} className="flex gap-1.5">
                 <input
                   type="text"
-                  value={newTodoInput}
-                  onChange={(e) => setNewTodoInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAddModalTodo()}
-                  placeholder="Add a new step..."
-                  className="flex-1 bg-[#F5ECE1] border border-[#8C4A27]/25 rounded-2xl px-4 py-2.5 text-xs font-serif text-[#241711] focus:outline-none"
+                  value={newTodo}
+                  onChange={(e) => setNewTodo(e.target.value)}
+                  placeholder="Add a filming or editing task..."
+                  className="flex-1 bg-[#FAF6F0] border border-[#8C4A27]/20 rounded-xl px-3 py-2 text-xs text-[#241711] placeholder-[#8C4A27]/50 focus:outline-none min-w-0"
                 />
                 <button
-                  onClick={handleAddModalTodo}
-                  className="bg-[#6B4426] hover:bg-[#52331B] text-[#FAF6F0] px-4 py-2.5 rounded-2xl text-xs font-sans font-bold cursor-pointer shadow-xs"
+                  type="submit"
+                  className="bg-[#6B4426] hover:bg-[#52331B] text-[#FAF6F0] px-3.5 py-2 rounded-xl text-xs font-bold cursor-pointer shrink-0 min-h-[38px]"
                 >
-                  + Add
+                  +
                 </button>
-              </div>
-
-              {/* Interactive Task List */}
-              <div className="w-full space-y-3 mb-6 text-left max-h-[220px] overflow-y-auto pr-1">
-                {todoTasks.map((t) => (
-                  <div
-                    key={t.id}
-                    onClick={() => toggleTodo(t.id)}
-                    className="flex items-center gap-3 cursor-pointer group p-2 rounded-xl hover:bg-[#F5ECE1] transition-colors"
-                  >
-                    <div className={`w-5 h-5 rounded-full border-2 border-[#6B4426] flex items-center justify-center transition-colors ${t.done ? 'bg-[#6B4426]' : 'bg-transparent'}`}>
-                      {t.done && <span className="text-white text-[10px] font-bold">✓</span>}
-                    </div>
-                    <span className={`text-sm font-serif text-[#241711] flex-1 ${t.done ? 'line-through opacity-40' : 'font-medium'}`}>
-                      {t.text}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              </form>
 
               <button
                 onClick={() => router.push('/todo')}
-                className="text-[10px] font-serif tracking-[0.2em] text-[#8C4A27] hover:text-[#241711] uppercase transition-colors cursor-pointer pt-3 border-t-2 border-dashed border-[#8C4A27]/25 w-full font-black"
+                className="w-full bg-[#EADBC8] hover:bg-[#DFCEB9] text-[#6B4426] border border-[#8C4A27]/25 py-2 rounded-xl text-xs font-sans font-bold uppercase tracking-wider transition-all cursor-pointer shadow-2xs text-center flex items-center justify-center gap-1.5 min-h-[38px]"
               >
-                Open Full To-Do Page →
+                <span>✦</span>
+                <span>Make a To-Do List</span>
+                <span>→</span>
               </button>
-            </motion.div>
+            </div>
           </div>
-        )}
-      </AnimatePresence>
 
-      {/* OVERWHELMED BEST-FRIEND THERAPY CHATBOX MODAL */}
-      <AnimatePresence>
-        {isOverwhelmedOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsOverwhelmedOpen(false)}
-              className="absolute inset-0 bg-[#241711]/50 backdrop-blur-xs cursor-pointer"
-            />
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.94, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.94, y: 15 }}
-              className="relative w-full max-w-lg bg-[#EADBC8] border-2 border-[#8C4A27]/40 rounded-[36px] p-6 shadow-[10px_10px_0px_0px_rgba(140,74,39,0.3)] z-10 flex flex-col h-[520px] justify-between font-sans"
-            >
-              {/* Header */}
-              <div className="pb-3 border-b-2 border-dashed border-[#8C4A27]/25 flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-full bg-[#6B4426] text-[#FAF6F0] flex items-center justify-center text-xs font-bold">
-                    🌱
+          {/* 4 TOOLS GRID */}
+          <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            {[
+              {
+                title: 'Concept Room',
+                tag: 'Interactive Room',
+                desc: 'Brainstorm & debate formats 1-on-1 with Cinera.',
+                icon: '💡',
+                route: '/studio/video-generator',
+              },
+              {
+                title: 'Directorial Shot List',
+                tag: 'Scene Builder',
+                desc: 'Turn treatments into timed camera beats & lighting cues.',
+                icon: '🎥',
+                route: '/studio/shot-list',
+              },
+              {
+                title: 'Sparks Vault',
+                tag: `${sparks.length} Saved`,
+                desc: 'Pin raw epiphanies, maxims, and hook fragments.',
+                icon: '✨',
+                route: '/sparks',
+              },
+              {
+                title: 'Shoot Schedule',
+                tag: 'Release Cadence',
+                desc: 'Map out filming dates and delivery deadlines.',
+                icon: '📅',
+                route: '/calendar',
+              },
+            ].map((tool) => (
+              <div
+                key={tool.title}
+                onClick={() => router.push(tool.route)}
+                className="bg-[#EADBC8]/70 hover:bg-[#EADBC8] border border-[#8C4A27]/25 hover:border-[#6B4426] rounded-2xl p-4 cursor-pointer transition-all flex flex-col justify-between group shadow-xs hover:-translate-y-0.5 min-h-[135px]"
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xl p-1.5 bg-[#FAF6F0] rounded-xl border border-[#8C4A27]/10">
+                      {tool.icon}
+                    </span>
+                    <span className="text-[9px] font-mono uppercase font-bold text-[#8C4A27] bg-[#FAF6F0] px-2 py-0.5 rounded-full border border-[#8C4A27]/15">
+                      {tool.tag}
+                    </span>
                   </div>
-                  <div>
-                    <h3 className="text-sm font-serif font-bold text-[#241711]">Cinera Best Friend Chat</h3>
-                    <span className="text-[10px] font-sans font-bold text-[#8C4A27]">Safe Space • No Pressure</span>
-                  </div>
+                  <h3 className="text-xs font-serif font-bold text-[#241711] mb-1 group-hover:text-[#6B4426]">
+                    {tool.title}
+                  </h3>
+                  <p className="text-[11px] font-serif text-[#241711]/80 leading-snug">
+                    {tool.desc}
+                  </p>
                 </div>
 
-                <button
-                  onClick={() => setIsOverwhelmedOpen(false)}
-                  className="text-[#8C4A27] hover:text-[#241711] text-xs font-sans cursor-pointer font-black"
-                >
-                  ✕
-                </button>
-              </div>
-
-              {/* Chat Thread */}
-              <div className="flex-1 overflow-y-auto py-4 space-y-3 pr-1">
-                {chatMessages.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div
-                      className={`max-w-[82%] p-3.5 rounded-2xl text-xs font-serif leading-relaxed shadow-2xs ${
-                        msg.sender === 'user'
-                          ? 'bg-[#6B4426] text-[#FAF6F0] rounded-br-xs font-medium'
-                          : 'bg-[#F5ECE1] text-[#241711] border border-[#8C4A27]/20 rounded-bl-xs font-medium'
-                      }`}
-                    >
-                      {msg.text}
-                    </div>
-                  </div>
-                ))}
-
-                {isFriendTyping && (
-                  <div className="flex justify-start">
-                    <div className="bg-[#F5ECE1] border border-[#8C4A27]/20 p-3 rounded-2xl rounded-bl-xs text-xs font-serif italic text-[#8C4A27] animate-pulse">
-                      Cinera is typing back...
-                    </div>
-                  </div>
-                )}
-                <div ref={chatEndRef} />
-              </div>
-
-              {/* Chat Input & Soft Create Bridge */}
-              <div className="pt-3 border-t-2 border-dashed border-[#8C4A27]/25 space-y-2.5">
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSendMessageToFriend()}
-                    placeholder="Talk to Cinera... How are you feeling right now?"
-                    className="flex-1 bg-[#F5ECE1] border border-[#8C4A27]/25 rounded-2xl px-4 py-2.5 text-xs font-serif text-[#241711] placeholder-[#8C4A27]/60 focus:outline-none"
-                  />
-                  <button
-                    onClick={handleSendMessageToFriend}
-                    className="bg-[#6B4426] hover:bg-[#52331B] text-[#FAF6F0] px-4 py-2.5 rounded-2xl text-xs font-sans font-bold cursor-pointer shadow-xs"
-                  >
-                    Send
-                  </button>
+                <div className="pt-2 mt-2 border-t border-[#8C4A27]/10 flex items-center justify-between text-[10px] font-bold text-[#8C4A27] group-hover:text-[#6B4426]">
+                  <span>Enter</span>
+                  <span className="group-hover:translate-x-1 transition-transform">→</span>
                 </div>
-
-                <button
-                  onClick={() => {
-                    setIsOverwhelmedOpen(false);
-                    const softConcept = chatMessages.find(m => m.sender === 'user')?.text || "A travel vignette shot entirely at 6 AM.";
-                    router.push(`/studio/video-generator?mode=overwhelmed&prompt=${encodeURIComponent(softConcept)}`);
-                  }}
-                  className="w-full bg-[#FAF6F0] hover:bg-[#F5ECE1] text-[#6B4426] border border-[#8C4A27]/30 py-2 rounded-2xl text-[11px] font-sans font-bold cursor-pointer transition-colors flex items-center justify-center gap-1.5 shadow-2xs"
-                >
-                  <span>🌱</span>
-                  <span>Ready? Build a simple video from our chat →</span>
-                </button>
               </div>
-            </motion.div>
+            ))}
           </div>
-        )}
-      </AnimatePresence>
 
-      {/* CREATOR PROFILE SETTINGS DRAWER */}
-      <ProfileDrawer
-        isOpen={isProfileOpen}
-        onClose={() => setIsProfileOpen(false)}
-        onNameChange={(newName) => setUserName(newName)}
+        </div>
+
+      </div>
+
+      {/* FOOTER */}
+      <footer className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-4 border-t border-[#8C4A27]/15 flex items-center justify-between text-[9px] sm:text-[10px] font-mono text-[#8C4A27]/70 uppercase relative z-10">
+        <span>CINERA STUDIO SUITE</span>
+        <span className="flex items-center gap-1.5">
+          <span>CLARITY & BRILLIANCE</span>
+          <FlowerDoodle size={16} colorFill="#F0B8C0" colorInner="#DE919B" colorCenter="#C26A75" />
+        </span>
+      </footer>
+
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
       />
-
-      {/* NETWORK / OFFLINE LISTENER SYSTEM */}
-      <NetworkErrorHandler />
     </div>
+  );
+}
+
+export default function StudioPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#FAF6F0] p-8 font-serif">Loading Studio...</div>}>
+      <StudioDashboardContent />
+    </Suspense>
   );
 }

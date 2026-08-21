@@ -1,43 +1,66 @@
+import { supabase } from '@/lib/supabase/client';
+
 export interface SparkItem {
-    id: number;
-    text: string;
-    date: string;
-    platform?: string;
+  id: string;
+  title?: string;
+  text?: string;
+  content?: string;
+  platform?: 'YouTube' | 'TikTok/Reels' | 'Podcast' | 'Brand/Ad' | 'General' | string;
+  type?: 'Concept' | 'Shot List' | 'Hook' | 'General';
+  createdAt: number;
+}
+
+// 🔒 User-scoped storage key
+async function getSparksStorageKey(): Promise<string> {
+  const { data: { user } } = await supabase.auth.getUser();
+  const userId = user?.id || 'guest';
+  return `cinera_sparks_vault_${userId}`;
+}
+
+export async function getSparks(): Promise<SparkItem[]> {
+  if (typeof window === 'undefined') return [];
+  const key = await getSparksStorageKey();
+  const raw = localStorage.getItem(key);
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('Error parsing sparks', e);
+    return [];
   }
-  
-  export function saveSpark(text: string, platform?: string): SparkItem[] {
-    if (typeof window === 'undefined') return [];
-  
-    const existingRaw = localStorage.getItem('cinera_recent_sparks');
-    const existingSparks: SparkItem[] = existingRaw ? JSON.parse(existingRaw) : [
-      { id: 1, text: 'A travel vignette shot entirely at 6 AM.', date: '2 days ago' },
-      { id: 2, text: 'Capturing ocean reflections through train glass.', date: 'Yesterday' },
-    ];
-  
-    const newSpark: SparkItem = {
-      id: Date.now(),
-      text: text.trim(),
-      date: 'Just now',
-      platform,
-    };
-  
-    const updated = [newSpark, ...existingSparks];
-    localStorage.setItem('cinera_recent_sparks', JSON.stringify(updated));
-    return updated;
+}
+
+export async function saveSpark(
+  content: string,
+  platform: string = 'YouTube',
+  type: 'Concept' | 'Shot List' | 'Hook' = 'Concept'
+): Promise<SparkItem> {
+  const existing = await getSparks();
+  const title = content.slice(0, 42).replace(/[\n#*]/g, '') + (content.length > 42 ? '...' : '');
+
+  const newSpark: SparkItem = {
+    id: Date.now().toString(),
+    title,
+    content,
+    text: content,
+    platform,
+    type: content.includes('Shot List') ? 'Shot List' : type,
+    createdAt: Date.now(),
+  };
+
+  const updated = [newSpark, ...existing];
+  if (typeof window !== 'undefined') {
+    const key = await getSparksStorageKey();
+    localStorage.setItem(key, JSON.stringify(updated));
   }
-  
-  export function getSparks(): SparkItem[] {
-    if (typeof window === 'undefined') return [];
-    const stored = localStorage.getItem('cinera_recent_sparks');
-    if (stored) {
-      try {
-        return JSON.parse(stored);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    return [
-      { id: 1, text: 'A travel vignette shot entirely at 6 AM.', date: '2 days ago' },
-      { id: 2, text: 'Capturing ocean reflections through train glass.', date: 'Yesterday' },
-    ];
+  return newSpark;
+}
+
+export async function deleteSpark(id: string): Promise<void> {
+  const existing = await getSparks();
+  const updated = existing.filter((s) => s.id !== id);
+  if (typeof window !== 'undefined') {
+    const key = await getSparksStorageKey();
+    localStorage.setItem(key, JSON.stringify(updated));
   }
+}

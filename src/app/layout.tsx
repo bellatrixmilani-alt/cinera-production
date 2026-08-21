@@ -1,10 +1,19 @@
 import './globals.css';
 import React from 'react';
-import FlowerDoodle from '@/components/landing/FlowerDoodle';
+import type { Metadata, Viewport } from 'next';
+import FlowerDoodle from '@/components/ui/FlowerDoodle';
 
-export const metadata = {
+export const metadata: Metadata = {
   title: 'Cinera AI — The Haven for Your Story',
   description: 'A workspace designed for calm, beauty and brilliance.',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  viewportFit: 'cover',
+  themeColor: '#FAF6F0',
 };
 
 export default function RootLayout({
@@ -13,8 +22,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className="relative min-h-screen bg-[#FAF6F0] text-[#241711] antialiased">
+    <html lang="en" className="h-full">
+      <body className="relative min-h-screen min-h-[100dvh] bg-[#FAF6F0] text-[#241711] antialiased selection:bg-[#EADBC8] overflow-x-hidden">
         {/* AUTOMATIC GLOBAL RETRO FLORAL BACKGROUND */}
         <div className="fixed inset-0 pointer-events-none select-none overflow-hidden z-0">
           {/* Top Left */}
@@ -51,7 +60,7 @@ export default function RootLayout({
         </div>
 
         {/* ALL PAGES RENDER HERE ON TOP OF THE FLOWERS */}
-        <div className="relative z-10">{children}</div>
+        <div className="relative z-10 min-h-screen min-h-[100dvh] flex flex-col">{children}</div>
       </body>
     </html>
   );

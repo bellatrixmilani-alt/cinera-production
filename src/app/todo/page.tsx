@@ -1,286 +1,430 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { saveSpark } from '../../lib/sparks';
+import React, { useState, useEffect, Suspense } from 'react';
+import { useRouter } from 'next/navigation';
+import FlowerAtmosphere from '@/components/ui/FlowerAtmosphere';
+import FlowerDoodle from '@/components/ui/FlowerDoodle';
+import { supabase } from '@/lib/supabase';
 
-interface TodoTask {
-  id: number;
+interface Task {
+  id: string;
   text: string;
-  category: 'PRE-PRODUCTION' | 'FILMING' | 'EDITING' | 'PUBLISHING';
+  category: 'Pre-Production' | 'Filming' | 'Editing' | 'Distribution';
+  timeEstimate: 'Quick Win (<15m)' | 'Focused Block (1-2h)' | 'Deep Work (Half Day)';
+  bucket: 'today' | 'tomorrow' | 'weekend' | 'upcoming';
   done: boolean;
-  dueDate?: string;
+  steps?: string[];
+  isGeneratingSteps?: boolean;
 }
 
-export default function TodoPage() {
+function TodoStudioContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-
-  const [filter, setFilter] = useState<'ALL' | 'PRE-PRODUCTION' | 'FILMING' | 'EDITING' | 'PUBLISHING'>('ALL');
+  const [userId, setUserId] = useState<string | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [activeBucket, setActiveBucket] = useState<'today' | 'tomorrow' | 'weekend' | 'upcoming'>('today');
   const [newTaskText, setNewTaskText] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<'PRE-PRODUCTION' | 'FILMING' | 'EDITING' | 'PUBLISHING'>('PRE-PRODUCTION');
+  const [newTaskCategory, setNewTaskCategory] = useState<Task['category']>('Pre-Production');
+  const [newTaskTime, setNewTaskTime] = useState<Task['timeEstimate']>('Quick Win (<15m)');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-
-  // Stored Tasks State
-  const [tasks, setTasks] = useState<TodoTask[]>([
-    { id: 1, text: 'Scout 6 AM location at Nairobi CBD', category: 'PRE-PRODUCTION', done: true },
-    { id: 2, text: 'Record B-roll of morning mist & traffic reflections', category: 'FILMING', done: false },
-    { id: 3, text: 'Apply 35mm warm film grain preset in DaVinci', category: 'EDITING', done: false },
-    { id: 4, text: 'Draft high-curiosity YouTube hook description', category: 'PUBLISHING', done: false },
-  ]);
-
-  useEffect(() => {
-    const incomingIdea = searchParams.get('idea');
-    if (incomingIdea) {
-      setNewTaskText(incomingIdea);
-    }
-
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('cinera_todo_list');
-      if (stored) {
-        try {
-          setTasks(JSON.parse(stored));
-        } catch (e) {
-          console.error(e);
-        }
-      }
-    }
-  }, [searchParams]);
-
-  const saveTasksToStorage = (updated: TodoTask[]) => {
-    setTasks(updated);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('cinera_todo_list', JSON.stringify(updated));
-    }
-  };
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 2500);
+    setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Add Task
-  const handleAddTask = () => {
-    if (!newTaskText.trim()) return;
-    const newTask: TodoTask = {
-      id: Date.now(),
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadUserTasks() {
+      setIsLoading(true);
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) {
+        if (isMounted) {
+          setUserId(null);
+          setTasks([]);
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      const uid = user.id;
+      if (isMounted) setUserId(uid);
+
+      const saved = localStorage.getItem(`cinera_tasks_full_${uid}`);
+      if (saved) {
+        try {
+          if (isMounted) setTasks(JSON.parse(saved));
+        } catch (e) {
+          console.error('Error parsing tasks', e);
+          if (isMounted) setTasks([]);
+        }
+      } else {
+        if (isMounted) setTasks([]);
+      }
+
+      if (isMounted) setIsLoading(false);
+    }
+
+    loadUserTasks();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const saveTasks = (updated: Task[], uid: string) => {
+    setTasks(updated);
+    localStorage.setItem(`cinera_tasks_full_${uid}`, JSON.stringify(updated));
+
+    const studioTodos = updated
+      .filter((t) => t.bucket === 'today')
+      .map((t) => ({ id: t.id, text: t.text, done: t.done }));
+    localStorage.setItem(`cinera_active_todos_${uid}`, JSON.stringify(studioTodos));
+  };
+
+  const handleAddTask = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTaskText.trim() || !userId) return;
+
+    const newTask: Task = {
+      id: Date.now().toString(),
       text: newTaskText.trim(),
-      category: selectedCategory,
+      category: newTaskCategory,
+      timeEstimate: newTaskTime,
+      bucket: activeBucket,
       done: false,
     };
-    saveTasksToStorage([newTask, ...tasks]);
+
+    const updated = [newTask, ...tasks];
+    saveTasks(updated, userId);
     setNewTaskText('');
+    showToast('✓ Task added to schedule.');
   };
 
-  // Toggle Done State
-  const toggleTask = (id: number) => {
+  const handleAddQuickSuggestion = (
+    text: string,
+    category: Task['category'],
+    timeEstimate: Task['timeEstimate']
+  ) => {
+    if (!userId) return;
+
+    const newTask: Task = {
+      id: Date.now().toString(),
+      text,
+      category,
+      timeEstimate,
+      bucket: activeBucket,
+      done: false,
+    };
+
+    const updated = [newTask, ...tasks];
+    saveTasks(updated, userId);
+    showToast(`✓ Added "${text}" to ${activeBucket}!`);
+  };
+
+  const toggleTask = (id: string) => {
+    if (!userId) return;
     const updated = tasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t));
-    saveTasksToStorage(updated);
+    saveTasks(updated, userId);
   };
 
-  // Delete Task
-  const deleteTask = (id: number) => {
+  const deleteTask = (id: string) => {
+    if (!userId) return;
     const updated = tasks.filter((t) => t.id !== id);
-    saveTasksToStorage(updated);
+    saveTasks(updated, userId);
+    showToast('🗑️ Task removed.');
   };
 
-  // Save Task to Spark Repository
-  const handleSaveToSpark = (text: string) => {
-    saveSpark(text, 'To-Do Task');
-    showToast('💡 Saved as a Spark! Viewable on your Studio desk.');
+  const handleGenerateSteps = async (task: Task) => {
+    if (!userId) return;
+    const updated = tasks.map((t) => (t.id === task.id ? { ...t, isGeneratingSteps: true } : t));
+    setTasks(updated);
+
+    try {
+      const res = await fetch('/api/ai/refine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            {
+              role: 'user',
+              content: `Deconstruct this creator task into 3 short, concrete, sequential sub-steps: "${task.text}"`,
+            },
+          ],
+        }),
+      });
+
+      const data = await res.json();
+      const rawText: string = data.reply || '';
+      const lines = rawText
+        .split('\n')
+        .map((l) => l.replace(/^[0-9*.-]+\s*/, '').trim())
+        .filter((l) => l.length > 5)
+        .slice(0, 3);
+
+      const finalTasks = tasks.map((t) =>
+        t.id === task.id ? { ...t, steps: lines, isGeneratingSteps: false } : t
+      );
+      saveTasks(finalTasks, userId);
+      showToast('✨ AI steps generated!');
+    } catch {
+      showToast('⚠️ Could not generate steps.');
+      const finalTasks = tasks.map((t) =>
+        t.id === task.id ? { ...t, isGeneratingSteps: false } : t
+      );
+      setTasks(finalTasks);
+    }
   };
 
-  // Schedule Task to Calendar
-  const handleScheduleToCalendar = (text: string) => {
-    router.push(`/calendar?idea=${encodeURIComponent(text)}`);
-  };
-
-  // Filtered List
-  const filteredTasks = filter === 'ALL' ? tasks : tasks.filter((t) => t.category === filter);
-  const completedCount = tasks.filter((t) => t.done).length;
-  const progressPercentage = tasks.length > 0 ? Math.round((completedCount / tasks.length) * 100) : 0;
+  const currentBucketTasks = tasks.filter((t) => t.bucket === activeBucket);
+  const doneCount = currentBucketTasks.filter((t) => t.done).length;
+  const totalCount = currentBucketTasks.length;
+  const percent = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
 
   return (
-    <div className="min-h-screen w-full bg-[#F5ECE1] text-[#241711] p-6 sm:p-12 font-sans relative overflow-x-hidden">
-      
-      {/* Toast Notification */}
-      <AnimatePresence>
-        {toastMessage && (
-          <motion.div
-            initial={{ opacity: 0, y: -20, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="fixed top-6 right-6 bg-[#6B4426] text-[#FAF6F0] px-5 py-3 rounded-2xl shadow-2xl text-xs font-sans font-bold flex items-center gap-2 z-50 border border-[#FAF6F0]/20"
-          >
-            <span>💡</span>
-            <span>{toastMessage}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
+    <div className="min-h-screen min-h-[100dvh] w-full bg-[#FAF6F0] text-[#241711] font-sans selection:bg-[#EADBC8] relative overflow-x-hidden flex flex-col justify-between">
+      <FlowerAtmosphere />
 
-      {/* 01 — HEADER BAR (Clean Bold Title Typography) */}
-      <header className="w-full max-w-5xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 mb-8 border-b-2 border-dashed border-[#8C4A27]/25">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => router.push('/studio')}
-            className="w-11 h-11 rounded-full bg-[#EADBC8] border-2 border-[#8C4A27]/30 hover:bg-[#DFCEB9] flex items-center justify-center text-sm font-bold text-[#241711] transition-transform hover:-translate-x-1 cursor-pointer shadow-2xs font-sans"
-          >
-            ←
-          </button>
-          <div>
-            <span className="text-[10px] font-sans tracking-[0.25em] text-[#8C4A27] uppercase font-black block mb-1">
-              PRODUCTION CHECKLIST
-            </span>
-            <h1 className="text-3xl sm:text-5xl font-serif font-bold text-[#241711] tracking-tight mt-0.5">
-              To-Do & Action Items
-            </h1>
+      {toastMessage && (
+        <div className="fixed top-6 right-6 bg-[#6B4426] text-[#FAF6F0] px-5 py-3 rounded-2xl shadow-2xl text-xs font-bold z-50 border border-[#FAF6F0]/20">
+          {toastMessage}
+        </div>
+      )}
+
+      <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 md:px-8 py-5 sm:py-8 relative z-10 flex flex-col gap-6 flex-1">
+        {/* HEADER */}
+        <header className="flex items-center justify-between pb-4 border-b border-[#8C4A27]/20">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => router.push('/studio')}
+              className="w-10 h-10 rounded-2xl bg-[#EADBC8] border border-[#8C4A27]/25 hover:bg-[#DFCEB9] flex items-center justify-center text-xs font-bold text-[#241711] transition-transform hover:-translate-x-0.5 cursor-pointer shadow-xs"
+              title="Back to Studio"
+            >
+              ←
+            </button>
+            <div>
+              <span className="text-[10px] font-mono uppercase tracking-widest text-[#8C4A27] font-bold block">
+                TASK DECOMPOSER
+              </span>
+              <h1 className="text-xl sm:text-2xl font-serif font-bold text-[#241711]">
+                Production Routine & To-Do
+              </h1>
+            </div>
           </div>
+        </header>
+
+        {/* TIME BUCKET TABS */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
+          {(['today', 'tomorrow', 'weekend', 'upcoming'] as const).map((bucket) => {
+            const count = tasks.filter((t) => t.bucket === bucket && !t.done).length;
+            return (
+              <button
+                key={bucket}
+                onClick={() => setActiveBucket(bucket)}
+                className={`px-4 sm:px-5 py-2 sm:py-2.5 rounded-2xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border flex items-center gap-2 shrink-0 ${
+                  activeBucket === bucket
+                    ? 'bg-[#6B4426] text-[#FAF6F0] border-[#6B4426] shadow-xs'
+                    : 'bg-[#EADBC8]/60 hover:bg-[#EADBC8] text-[#8C4A27] border-[#8C4A27]/20'
+                }`}
+              >
+                <span>{bucket}</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#FAF6F0]/20">
+                  {count} left
+                </span>
+              </button>
+            );
+          })}
         </div>
 
-        {/* Progress Tracker Pill */}
-        <div className="bg-[#EADBC8] border-2 border-[#8C4A27]/35 rounded-2xl p-4 flex items-center gap-4 shadow-2xs">
-          <div>
-            <span className="text-[10px] font-sans font-black text-[#8C4A27] uppercase tracking-wider block">
-              PROGRESS: {completedCount} / {tasks.length} DONE
-            </span>
-            <div className="w-40 bg-[#F5ECE1] h-2.5 rounded-full overflow-hidden mt-1.5 border border-[#8C4A27]/20">
+        {/* PROGRESS BAR */}
+        {totalCount > 0 && (
+          <div className="bg-[#EADBC8]/70 border border-[#8C4A27]/20 rounded-2xl p-4 flex flex-col gap-2">
+            <div className="flex items-center justify-between text-xs font-serif font-bold text-[#241711]">
+              <span>🎯 {doneCount} of {totalCount} {activeBucket} tasks completed</span>
+              <span className="font-mono text-[#8C4A27]">{percent}% Complete</span>
+            </div>
+            <div className="w-full h-2 bg-[#FAF6F0] rounded-full overflow-hidden">
               <div
-                className="bg-[#6B4426] h-full transition-all duration-500 rounded-full"
-                style={{ width: `${progressPercentage}%` }}
+                style={{ width: `${percent}%` }}
+                className="h-full bg-[#6B4426] transition-all duration-300 rounded-full"
               />
             </div>
           </div>
-          <span className="text-xl font-serif font-bold text-[#241711]">
-            {progressPercentage}%
-          </span>
+        )}
+
+        {/* QUICK SUGGESTION CHIPS */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
+          {[
+            { text: 'Record B-Roll cutaways', cat: 'Filming' as const, time: 'Focused Block (1-2h)' as const },
+            { text: 'Check audio level calibration', cat: 'Pre-Production' as const, time: 'Quick Win (<15m)' as const },
+            { text: 'Grade color profile & LUTs', cat: 'Editing' as const, time: 'Focused Block (1-2h)' as const },
+            { text: 'Source background music & SFX', cat: 'Editing' as const, time: 'Quick Win (<15m)' as const },
+          ].map((s) => (
+            <button
+              key={s.text}
+              type="button"
+              onClick={() => handleAddQuickSuggestion(s.text, s.cat, s.time)}
+              className="text-[11px] font-sans font-bold text-[#8C4A27] bg-[#EADBC8]/70 hover:bg-[#EADBC8] px-3 py-1.5 rounded-full border border-[#8C4A27]/20 whitespace-nowrap transition-all cursor-pointer shrink-0 hover:scale-102 shadow-2xs"
+            >
+              + {s.text}
+            </button>
+          ))}
         </div>
-      </header>
 
-      {/* 02 — TASK INPUT DOCK (Light Pill Outlines) */}
-      <section className="w-full max-w-3xl mx-auto mb-10">
-        <div className="bg-[#EADBC8] border-2 border-[#8C4A27]/35 rounded-3xl p-3 shadow-[6px_6px_0px_0px_rgba(140,74,39,0.2)] hover:shadow-[8px_8px_0px_0px_rgba(140,74,39,0.3)] transition-all flex flex-col sm:flex-row items-center gap-3">
-          
-          {/* Category Dropdown Selector */}
-          <select
-            value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value as any)}
-            className="bg-[#F5ECE1] text-[#6B4426] text-xs font-sans font-black px-3.5 py-2.5 rounded-2xl border-2 border-[#8C4A27]/25 focus:outline-none cursor-pointer uppercase tracking-wider"
-          >
-            <option value="PRE-PRODUCTION">Pre-Production</option>
-            <option value="FILMING">Filming</option>
-            <option value="EDITING">Editing</option>
-            <option value="PUBLISHING">Publishing</option>
-          </select>
+        {/* ADD TASK FORM */}
+        <form
+          onSubmit={handleAddTask}
+          className="bg-[#EADBC8]/80 backdrop-blur-md border border-[#8C4A27]/25 rounded-[24px] p-4 flex flex-col gap-3 shadow-xs"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-[#8C4A27]">✦</span>
+            <input
+              type="text"
+              value={newTaskText}
+              onChange={(e) => setNewTaskText(e.target.value)}
+              placeholder={`Add a new task for ${activeBucket}...`}
+              className="flex-1 bg-transparent text-xs sm:text-sm font-serif text-[#241711] placeholder-[#8C4A27]/60 focus:outline-none min-w-0"
+            />
+          </div>
 
-          {/* Text Input */}
-          <input
-            type="text"
-            value={newTaskText}
-            onChange={(e) => setNewTaskText(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleAddTask()}
-            placeholder="Add production step or task (e.g. 'Record voiceover narration')..."
-            className="flex-1 bg-transparent text-xs sm:text-sm font-serif text-[#241711] placeholder-[#8C4A27]/60 focus:outline-none px-2 w-full font-medium"
-          />
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#8C4A27]/15">
+            <div className="flex items-center gap-2">
+              <select
+                value={newTaskCategory}
+                onChange={(e) => setNewTaskCategory(e.target.value as any)}
+                className="bg-[#FAF6F0] border border-[#8C4A27]/20 rounded-xl px-3 py-1.5 text-xs font-serif text-[#241711] focus:outline-none cursor-pointer"
+              >
+                <option value="Pre-Production">Pre-Production</option>
+                <option value="Filming">Filming</option>
+                <option value="Editing">Editing</option>
+                <option value="Distribution">Distribution</option>
+              </select>
 
-          <button
-            onClick={handleAddTask}
-            className="bg-[#6B4426] hover:bg-[#52331B] text-[#FAF6F0] px-6 py-2.5 rounded-2xl text-xs font-sans tracking-[0.15em] uppercase font-black transition-all shadow-sm cursor-pointer w-full sm:w-auto"
-          >
-            + Add Task
-          </button>
-        </div>
-      </section>
+              <select
+                value={newTaskTime}
+                onChange={(e) => setNewTaskTime(e.target.value as any)}
+                className="bg-[#FAF6F0] border border-[#8C4A27]/20 rounded-xl px-3 py-1.5 text-xs font-serif text-[#241711] focus:outline-none cursor-pointer"
+              >
+                <option value="Quick Win (<15m)">⚡ Quick Win (&lt;15m)</option>
+                <option value="Focused Block (1-2h)">⏱ Focused Block (1-2h)</option>
+                <option value="Deep Work (Half Day)">🔋 Deep Work (Half Day)</option>
+              </select>
+            </div>
 
-      {/* 03 — CATEGORY FILTER TABS (Light Pill Outlines) */}
-      <section className="w-full max-w-5xl mx-auto flex flex-wrap gap-2.5 justify-center mb-8">
-        {(['ALL', 'PRE-PRODUCTION', 'FILMING', 'EDITING', 'PUBLISHING'] as const).map((cat) => (
-          <button
-            key={cat}
-            onClick={() => setFilter(cat)}
-            className={`px-4 py-2 rounded-2xl text-xs font-sans font-bold transition-all cursor-pointer border-2 ${
-              filter === cat
-                ? 'bg-[#6B4426] text-[#FAF6F0] border-[#6B4426] shadow-[3px_3px_0px_0px_#A6633C]'
-                : 'bg-[#EADBC8] text-[#8C4A27] border-[#8C4A27]/25 hover:bg-[#DFCEB9]'
-            }`}
-          >
-            {cat}
-          </button>
-        ))}
-      </section>
+            <button
+              type="submit"
+              disabled={!newTaskText.trim()}
+              className="bg-[#6B4426] hover:bg-[#52331B] disabled:opacity-40 text-[#FAF6F0] px-5 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shadow-xs shrink-0"
+            >
+              + Add to {activeBucket}
+            </button>
+          </div>
+        </form>
 
-      {/* 04 — TASKS LIST */}
-      <main className="w-full max-w-4xl mx-auto space-y-3 mb-12">
-        <AnimatePresence>
-          {filteredTasks.length === 0 ? (
-            <div className="bg-[#EADBC8] border-2 border-dashed border-[#8C4A27]/30 rounded-3xl p-10 text-center font-serif text-[#8C4A27] italic font-medium">
-              No tasks listed under this category. Add one above!
+        {/* TASK LIST CONTAINER */}
+        <main className="space-y-3">
+          {isLoading ? (
+            <div className="p-8 text-center text-xs font-serif italic text-[#8C4A27]">
+              Loading your workspace...
+            </div>
+          ) : currentBucketTasks.length === 0 ? (
+            <div className="bg-[#EADBC8]/30 border-2 border-dashed border-[#8C4A27]/20 rounded-[24px] p-8 text-center flex flex-col items-center justify-center gap-2">
+              <span className="text-2xl">🌱</span>
+              <h4 className="text-sm font-serif font-bold text-[#241711]">No tasks scheduled for {activeBucket}</h4>
+              <p className="text-xs font-serif text-[#8C4A27]">
+                Add your filming or editing milestones above to get started.
+              </p>
             </div>
           ) : (
-            filteredTasks.map((task) => (
-              <motion.div
+            currentBucketTasks.map((task) => (
+              <div
                 key={task.id}
-                layout
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className={`bg-[#EADBC8] border-2 rounded-2xl p-4 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-[4px_4px_0px_0px_rgba(140,74,39,0.15)] hover:shadow-[6px_6px_0px_0px_rgba(140,74,39,0.25)] ${
-                  task.done ? 'border-[#8C4A27]/20 opacity-60 bg-[#EADBC8]/60' : 'border-[#8C4A27]/35'
+                className={`bg-[#FAF6F0] border rounded-[22px] p-4 transition-all flex flex-col gap-2.5 ${
+                  task.done
+                    ? 'border-[#8C4A27]/15 opacity-70 bg-[#FAF6F0]/60'
+                    : 'border-[#8C4A27]/25 shadow-xs'
                 }`}
               >
-                {/* Left: Checkbox + Text + Badge */}
-                <div className="flex items-center gap-3.5 flex-1">
-                  <button
-                    onClick={() => toggleTask(task.id)}
-                    className={`w-6 h-6 rounded-full border-2 border-[#6B4426] flex items-center justify-center transition-all cursor-pointer shrink-0 ${
-                      task.done ? 'bg-[#6B4426]' : 'bg-transparent hover:border-[#8C4A27]'
-                    }`}
-                  >
-                    {task.done && <span className="text-white text-xs font-bold">✓</span>}
-                  </button>
-
-                  <div>
-                    <p className={`text-sm font-serif text-[#241711] font-medium ${task.done ? 'line-through text-[#8C4A27]' : ''}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={task.done}
+                      onChange={() => toggleTask(task.id)}
+                      className="w-5 h-5 accent-[#6B4426] rounded cursor-pointer shrink-0"
+                    />
+                    <span
+                      className={`text-xs sm:text-sm font-serif font-medium truncate ${
+                        task.done ? 'line-through text-[#8C4A27]/50' : 'text-[#241711]'
+                      }`}
+                    >
                       {task.text}
-                    </p>
-                    <span className="text-[9px] font-sans font-black text-[#8C4A27] tracking-wider uppercase bg-[#FAF6F0] border border-[#8C4A27]/20 px-2 py-0.5 rounded-full inline-block mt-1">
-                      {task.category}
                     </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => handleGenerateSteps(task)}
+                      disabled={task.isGeneratingSteps}
+                      className="text-[10px] font-sans font-bold text-[#8C4A27] bg-[#EADBC8] hover:bg-[#DFCEB9] px-2.5 py-1 rounded-lg border border-[#8C4A27]/20 transition-all cursor-pointer flex items-center gap-1"
+                    >
+                      <span>✦</span>
+                      <span>{task.isGeneratingSteps ? 'Generating...' : 'Steps'}</span>
+                    </button>
+                    <button
+                      onClick={() => deleteTask(task.id)}
+                      className="text-[#8C4A27] hover:text-red-700 font-bold text-sm px-1 cursor-pointer"
+                    >
+                      ×
+                    </button>
                   </div>
                 </div>
 
-                {/* Right Action Triggers: Save to Spark, Schedule, Delete */}
-                <div className="flex items-center gap-2 border-t sm:border-t-0 pt-2 sm:pt-0 border-[#8C4A27]/20 justify-end">
-                  <button
-                    onClick={() => handleSaveToSpark(task.text)}
-                    title="Save to Sparks"
-                    className="bg-[#FAF6F0] hover:bg-[#F5ECE1] text-[#241711] px-3 py-1.5 rounded-xl text-[10px] font-sans font-bold cursor-pointer transition-colors border border-[#8C4A27]/20 flex items-center gap-1 shadow-2xs"
-                  >
-                    <span>💡</span>
-                    <span>Spark</span>
-                  </button>
-
-                  <button
-                    onClick={() => handleScheduleToCalendar(task.text)}
-                    title="Schedule on Calendar"
-                    className="bg-[#FAF6F0] hover:bg-[#F5ECE1] text-[#241711] px-3 py-1.5 rounded-xl text-[10px] font-sans font-bold cursor-pointer transition-colors border border-[#8C4A27]/20 flex items-center gap-1 shadow-2xs"
-                  >
-                    <span>📅</span>
-                    <span>Calendar</span>
-                  </button>
-
-                  <button
-                    onClick={() => deleteTask(task.id)}
-                    className="text-[#8C4A27] hover:text-[#241711] p-1.5 text-xs font-bold transition-colors cursor-pointer"
-                  >
-                    ✕
-                  </button>
+                <div className="flex items-center gap-2 pl-8">
+                  <span className="text-[9px] font-mono font-bold uppercase text-[#8C4A27] bg-[#EADBC8]/60 px-2 py-0.5 rounded-md">
+                    {task.category}
+                  </span>
+                  <span className="text-[9px] font-mono text-[#8C4A27]/80">
+                    {task.timeEstimate}
+                  </span>
                 </div>
-              </motion.div>
+
+                {task.steps && task.steps.length > 0 && (
+                  <div className="ml-8 mt-1 p-3 bg-[#EADBC8]/40 border border-[#8C4A27]/15 rounded-xl space-y-1.5 text-xs font-serif text-[#241711]">
+                    <span className="text-[9px] font-mono uppercase font-bold text-[#8C4A27] block">
+                      AI DECONSTRUCTION:
+                    </span>
+                    {task.steps.map((s, idx) => (
+                      <div key={idx} className="flex items-start gap-2">
+                        <span className="text-[#8C4A27] font-bold">{idx + 1}.</span>
+                        <span>{s}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             ))
           )}
-        </AnimatePresence>
-      </main>
+        </main>
+      </div>
+
+      <footer className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-4 border-t border-[#8C4A27]/15 flex items-center justify-between text-[9px] sm:text-[10px] font-mono text-[#8C4A27]/70 uppercase relative z-10">
+        <span>CINERA TASK DECOMPOSER</span>
+        <span className="flex items-center gap-1.5">
+          <span>CALM CADENCE</span>
+          <FlowerDoodle size={16} colorFill="#F0B8C0" colorInner="#DE919B" colorCenter="#C26A75" />
+        </span>
+      </footer>
     </div>
+  );
+}
+
+export default function TodoPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#FAF6F0] p-8 font-serif">Loading Tasks...</div>}>
+      <TodoStudioContent />
+    </Suspense>
   );
 }
