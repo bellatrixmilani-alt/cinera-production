@@ -2,6 +2,7 @@ import './globals.css';
 import React from 'react';
 import type { Metadata, Viewport } from 'next';
 import { Playfair_Display, Plus_Jakarta_Sans } from 'next/font/google';
+import { Analytics } from '@vercel/analytics/react';
 import FlowerDoodle from '@/components/ui/FlowerDoodle';
 
 const playfair = Playfair_Display({
@@ -31,7 +32,7 @@ export const metadata: Metadata = {
         url: '/opengraph-image',
         width: 1200,
         height: 630,
-        alt: 'Cinera AI',
+        alt: 'Cinera AI — The Haven for Your Story',
       },
     ],
     locale: 'en_US',
@@ -100,6 +101,9 @@ export default function RootLayout({
         <div className="relative z-10 min-h-screen min-h-[100dvh] flex flex-col">
           {children}
         </div>
+
+        {/* LIGHTWEIGHT REAL-TIME ANALYTICS */}
+        <Analytics />
       </body>
     </html>
   );
