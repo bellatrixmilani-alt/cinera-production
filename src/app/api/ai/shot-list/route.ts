@@ -61,7 +61,7 @@ Convert the user's premise into an ultra-precise, rhythmically paced directorial
 Provide exact focal lengths, practical lighting directions (e.g. key light at 45°, diffusion setups), dynamic camera moves, and sharp script beats.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-2.0-flash',
       contents: prompt,
       config: {
         systemInstruction,
