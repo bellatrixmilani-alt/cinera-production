@@ -22,7 +22,7 @@ Provide concrete, camera-specific instructions (lighting, focal lengths, hook ps
     }));
 
     const responseStream = await ai.models.generateContentStream({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.6-flash',
       contents,
       config: {
         systemInstruction,

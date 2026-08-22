@@ -93,7 +93,7 @@ YOUR STYLE:
    }));
 
    const response = await ai.models.generateContent({
-     model: 'gemini-2.0-flash',
+     model: 'gemini-3.6-flash',
      contents: contents as any,
      config: {
        systemInstruction,
