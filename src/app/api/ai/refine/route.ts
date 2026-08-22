@@ -84,19 +84,23 @@ YOUR STYLE:
 3. Offer 2-3 actionable angles, then ask the single next question that locks down the plan.
 `;
 
-    const contents = normalizedMessages.map((msg) => ({
-      role: msg.role === 'user' ? 'user' : 'model',
-      parts: [{ text: msg.content }],
-    }));
+   // Slice the last 8 messages from normalizedMessages to prevent token inflation
+   const recentMessages = normalizedMessages.slice(-8);
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: contents as any,
-      config: {
-        systemInstruction,
-        temperature: 0.7,
-      },
-    });
+   const contents = recentMessages.map((msg) => ({
+     role: msg.role === 'user' ? 'user' : 'model',
+     parts: [{ text: msg.content }],
+   }));
+
+   const response = await ai.models.generateContent({
+     model: 'gemini-2.5-flash',
+     contents: contents as any,
+     config: {
+       systemInstruction,
+       maxOutputTokens: 1024,
+       temperature: 0.7,
+     },
+   });
 
     const reply = response.text || "Let's explore that angle further.";
     return NextResponse.json({ reply });

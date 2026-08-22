@@ -44,7 +44,7 @@ function VideoGeneratorChatContent() {
   const [platform, setPlatform] = useState<'YouTube' | 'TikTok/Reels' | 'Podcast' | 'Brand/Ad'>('YouTube');
   const [messages, setMessages] = useState<Message[]>([DEFAULT_WELCOME_MESSAGE]);
   const [input, setInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -58,7 +58,9 @@ function VideoGeneratorChatContent() {
 
   const getCreatorProfile = (uid: string) => {
     if (typeof window === 'undefined') return null;
-    const raw = localStorage.getItem(`cinera_creator_profile_${uid}`) || localStorage.getItem('cinera_creator_profile');
+    const raw =
+      localStorage.getItem(`cinera_creator_profile_${uid}`) ||
+      localStorage.getItem('cinera_creator_profile');
     try {
       return raw ? JSON.parse(raw) : null;
     } catch {
@@ -87,7 +89,6 @@ function VideoGeneratorChatContent() {
           console.error(e);
         }
       }
-      // If brand new account, clean slate
       setSessions([]);
       setActiveSessionId(Date.now().toString());
       setMessages([DEFAULT_WELCOME_MESSAGE]);
@@ -103,9 +104,13 @@ function VideoGeneratorChatContent() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isTyping]);
+  }, [messages, isStreaming]);
 
-  const saveCurrentSession = (updatedMessages: Message[], updatedPlatform: typeof platform, currentUid: string) => {
+  const saveCurrentSession = (
+    updatedMessages: Message[],
+    updatedPlatform: typeof platform,
+    currentUid: string
+  ) => {
     if (!activeSessionId) return;
 
     setSessions((prevSessions) => {
@@ -174,7 +179,7 @@ function VideoGeneratorChatContent() {
 
   const sendMessage = async (customText?: string) => {
     const userText = (customText || input).trim();
-    if (!userText || isTyping) return;
+    if (!userText || isStreaming) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -183,46 +188,87 @@ function VideoGeneratorChatContent() {
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
 
-    const newHistory = [...messages, userMessage];
-    setMessages(newHistory);
+    const assistantPlaceholderId = (Date.now() + 1).toString();
+    const assistantPlaceholder: Message = {
+      id: assistantPlaceholderId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    const historyWithUser = [...messages, userMessage];
+    const initialRenderHistory = [...historyWithUser, assistantPlaceholder];
+
+    setMessages(initialRenderHistory);
     setInput('');
-    setIsTyping(true);
-    saveCurrentSession(newHistory, platform, userId);
+    setIsStreaming(true);
 
     try {
       const profile = getCreatorProfile(userId);
 
-      const response = await fetch('/api/ai/refine', {
+      const response = await fetch('/api/ai/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: newHistory.map((m) => ({ role: m.role, content: m.content })),
+          messages: historyWithUser.map((m) => ({ role: m.role, content: m.content })),
           platform,
           creatorProfile: profile,
         }),
       });
 
-      if (!response.ok) {
+      if (!response.ok || !response.body) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || 'Connection error');
+        throw new Error(errData.error || 'Streaming connection interrupted');
       }
 
-      const data = await response.json();
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: data.reply,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let streamedAccumulator = '';
 
-      const finalHistory = [...newHistory, assistantMessage];
-      setMessages(finalHistory);
-      saveCurrentSession(finalHistory, platform, userId);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const textChunk = decoder.decode(value, { stream: true });
+        streamedAccumulator += textChunk;
+
+        setMessages((prevMessages) => {
+          const next = [...prevMessages];
+          const lastIdx = next.length - 1;
+          if (lastIdx >= 0 && next[lastIdx].id === assistantPlaceholderId) {
+            next[lastIdx] = {
+              ...next[lastIdx],
+              content: streamedAccumulator,
+            };
+          }
+          return next;
+        });
+      }
+
+      const finalCompletedHistory = [
+        ...historyWithUser,
+        {
+          ...assistantPlaceholder,
+          content: streamedAccumulator,
+        },
+      ];
+      saveCurrentSession(finalCompletedHistory, platform, userId);
     } catch (err: any) {
       console.error(err);
-      showToast(`⚠️ ${err.message || 'Could not reach Cinera'}`);
+      showToast(`⚠️ ${err.message || 'Could not reach Cinera stream'}`);
+      setMessages((prev) => {
+        const next = [...prev];
+        const lastIdx = next.length - 1;
+        if (lastIdx >= 0 && next[lastIdx].id === assistantPlaceholderId) {
+          next[lastIdx] = {
+            ...next[lastIdx],
+            content: '⚠️ Connection lost while streaming. Let’s try that prompt again.',
+          };
+        }
+        return next;
+      });
     } finally {
-      setIsTyping(false);
+      setIsStreaming(false);
     }
   };
 
@@ -312,7 +358,7 @@ function VideoGeneratorChatContent() {
           <div className="pt-4 border-t border-[#8C4A27]/20 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-green-600 animate-pulse"></span>
-              <span className="text-[11px] font-sans font-bold text-[#8C4A27]">Cinera Co-Producer</span>
+              <span className="text-[11px] font-sans font-bold text-[#8C4A27]">Cinera Stream Engine</span>
             </div>
             <FlowerDoodle size={22} colorFill="#F0B8C0" colorInner="#DE919B" colorCenter="#C26A75" />
           </div>
@@ -345,7 +391,7 @@ function VideoGeneratorChatContent() {
             <div>
               <h2 className="text-base font-serif font-bold text-[#241711]">Cinera Concept Session</h2>
               <span className="text-[10px] tracking-widest text-[#8C4A27] uppercase font-bold">
-                Interactive Creator Chamber
+                Live Directorial Stream
               </span>
             </div>
           </div>
@@ -373,6 +419,8 @@ function VideoGeneratorChatContent() {
         <main className="flex-1 overflow-y-auto p-6 flex flex-col gap-5 max-w-4xl w-full mx-auto">
           {messages.map((msg) => {
             const isUser = msg.role === 'user';
+            const isPlaceholderEmpty = !isUser && !msg.content && isStreaming;
+
             return (
               <motion.div
                 key={msg.id}
@@ -391,10 +439,17 @@ function VideoGeneratorChatContent() {
                       : 'bg-[#EADBC8]/90 text-[#241711] rounded-tl-xs shadow-xs border border-[#8C4A27]/25 font-serif whitespace-pre-wrap'
                   }`}
                 >
-                  {msg.content}
+                  {isPlaceholderEmpty ? (
+                    <div className="flex items-center gap-2 text-[#8C4A27] font-mono text-xs py-1">
+                      <span className="w-2 h-2 rounded-full bg-[#8C4A27] animate-ping" />
+                      <span>Directing & streaming tokens...</span>
+                    </div>
+                  ) : (
+                    msg.content
+                  )}
                 </div>
 
-                {!isUser && msg.id !== 'welcome' && (
+                {!isUser && msg.content && msg.id !== 'welcome' && (
                   <div className="flex items-center gap-2 mt-2 px-1">
                     <button
                       onClick={async () => {
@@ -407,7 +462,9 @@ function VideoGeneratorChatContent() {
                     </button>
                     <button
                       onClick={() =>
-                        router.push(`/studio/shot-list?concept=${encodeURIComponent(msg.content.slice(0, 200))}`)
+                        router.push(
+                          `/studio/shot-list?concept=${encodeURIComponent(msg.content.slice(0, 200))}`
+                        )
                       }
                       className="text-[10px] font-bold text-[#FAF6F0] bg-[#6B4426] hover:bg-[#52331B] px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1 shadow-md hover:scale-105"
                     >
@@ -418,13 +475,6 @@ function VideoGeneratorChatContent() {
               </motion.div>
             );
           })}
-
-          {isTyping && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-2 text-[#8C4A27] text-xs italic font-serif">
-              <span className="w-2 h-2 rounded-full bg-[#8C4A27] animate-ping"></span>
-              Cinera is crafting the angle...
-            </motion.div>
-          )}
 
           <div ref={messagesEndRef} />
         </main>
@@ -440,7 +490,7 @@ function VideoGeneratorChatContent() {
               <button
                 key={suggestion}
                 onClick={() => sendMessage(suggestion)}
-                disabled={isTyping}
+                disabled={isStreaming}
                 className="text-[11px] font-bold text-[#8C4A27] bg-[#EADBC8]/70 hover:bg-[#EADBC8] px-3 py-1.5 rounded-full border border-[#8C4A27]/20 whitespace-nowrap transition-all cursor-pointer shrink-0 hover:scale-102 shadow-2xs"
               >
                 + {suggestion}
@@ -464,10 +514,10 @@ function VideoGeneratorChatContent() {
             />
             <button
               onClick={() => sendMessage()}
-              disabled={isTyping || !input.trim()}
+              disabled={isStreaming || !input.trim()}
               className="bg-[#6B4426] hover:bg-[#52331B] disabled:opacity-40 text-[#FAF6F0] px-5 py-3 rounded-full text-xs font-bold transition-transform hover:scale-105 cursor-pointer shrink-0 flex items-center gap-1 shadow-xs"
             >
-              <span>Send</span>
+              <span>{isStreaming ? 'Streaming' : 'Send'}</span>
               <span>↑</span>
             </button>
           </div>
@@ -479,7 +529,9 @@ function VideoGeneratorChatContent() {
 
 export default function VideoGeneratorPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-[#FAF6F0] p-10 font-serif">Loading Generator...</div>}>
+    <Suspense
+      fallback={<div className="min-h-screen bg-[#FAF6F0] p-10 font-serif">Loading Generator...</div>}
+    >
       <VideoGeneratorChatContent />
     </Suspense>
   );
